@@ -1,0 +1,241 @@
+/* Clyde — supplemental styles. Implements the Clyde design system on top of Tailwind:
+   near-monochrome canvas, restrained indigo accent, Inter + JetBrains Mono.
+   Tailwind theme tokens (bg, accent, …) are remapped in index.html to these values. */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+/* ─── Design tokens (dark, primary) ───
+   Surfaces, borders, text, accent, semantic, entity. Light theme not yet wired
+   into the SPA — kept in tokens.jsx for parity. */
+:root {
+  --cl-bg: #0a0b0d;
+  --cl-surface: #111215;
+  --cl-surface-2: #16181c;
+  --cl-surface-3: #1c1f24;
+  --cl-inset: #07080a;
+
+  --cl-border: rgba(255, 255, 255, 0.06);
+  --cl-border-strong: rgba(255, 255, 255, 0.1);
+  --cl-border-focus: rgba(130, 127, 255, 0.45);
+
+  --cl-fg: #f2f3f5;
+  --cl-fg-2: #b8bcc4;
+  --cl-fg-3: #72767e;
+  --cl-fg-4: #464a52;
+
+  --cl-accent: #8481ff;
+  --cl-accent-dim: #6663d9;
+  --cl-accent-glow: rgba(132, 129, 255, 0.18);
+
+  --cl-positive: #4ade80;
+  --cl-negative: #f87171;
+  --cl-warn: #fbbf24;
+  --cl-info: #60a5fa;
+}
+
+html,
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  letter-spacing: -0.01em;
+  background: var(--cl-bg);
+  color: var(--cl-fg);
+}
+
+/* Mono utility — paired with Tailwind class .font-mono via theme config. */
+.cl-mono,
+.font-mono,
+[class*="tabular-nums"] {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "ss02", "cv02";
+  letter-spacing: 0;
+}
+
+::selection {
+  background: var(--cl-accent-glow);
+}
+
+/* ─── Hero grid backdrop ─── */
+.bg-grid {
+  background-image: radial-gradient(rgba(132, 129, 255, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse 70% 45% at 50% 22%, #000 45%, transparent 90%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 45% at 50% 22%, #000 45%, transparent 90%);
+}
+
+/* ─── Animations ─── */
+@keyframes cl-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+@keyframes cl-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+@keyframes cl-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes cl-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+@keyframes cl-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.cl-mascot-blink {
+  transform-origin: center;
+  animation: cl-blink 4.2s infinite;
+}
+.cl-mascot-float {
+  display: inline-flex;
+  animation: cl-float 3.2s ease-in-out infinite;
+}
+
+/* progress shimmer overlay */
+.progress-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* result fade-in */
+.result-fade {
+  animation: fadeUp 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Markdown report body ─── */
+.prose-clyde p {
+  margin: 0 0 0.85em 0;
+  line-height: 1.7;
+  color: var(--cl-fg-2);
+}
+.prose-clyde ul,
+.prose-clyde ol {
+  margin: 0 0 0.85em 1.25em;
+}
+.prose-clyde li { margin-bottom: 0.3em; color: var(--cl-fg-2); }
+.prose-clyde strong { color: var(--cl-fg); font-weight: 600; }
+.prose-clyde em { color: var(--cl-fg-2); }
+.prose-clyde code {
+  font-family: "JetBrains Mono", monospace;
+  background: var(--cl-surface-2);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  color: var(--cl-fg);
+  border: 1px solid var(--cl-border);
+}
+.prose-clyde h3,
+.prose-clyde h4 {
+  color: var(--cl-fg);
+  font-weight: 600;
+  margin-top: 1.1em;
+  margin-bottom: 0.4em;
+  font-size: 1rem;
+  letter-spacing: -0.015em;
+}
+.prose-clyde a {
+  color: var(--cl-accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(132, 129, 255, 0.4);
+  text-underline-offset: 2px;
+}
+.prose-clyde blockquote {
+  border-left: 2px solid var(--cl-accent);
+  padding-left: 0.9em;
+  color: var(--cl-fg-2);
+  margin: 0.6em 0;
+}
+
+/* ─── Scrollbars ─── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--cl-border-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
+
+kbd {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0;
+}
+
+/* Status pill — provider badge in header */
+.cl-statuspill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  background: var(--cl-surface-2);
+  border: 1px solid var(--cl-border);
+  border-radius: 14px;
+  font-size: 11px;
+}
+.cl-statuspill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  animation: cl-pulse 1.8s ease-in-out infinite;
+}
+
+/* Chip — neutral pill used for examples, branch labels, etc. */
+.cl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--cl-fg-2);
+  border: 1px solid var(--cl-border);
+  border-radius: 4px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 140ms cubic-bezier(0.2, 0.7, 0.3, 1),
+              border-color 140ms cubic-bezier(0.2, 0.7, 0.3, 1),
+              color 140ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.cl-chip:hover {
+  background: var(--cl-surface-2);
+  border-color: var(--cl-border-strong);
+  color: var(--cl-fg);
+}
+
+/* Evidence chip — accent-tinted, mono */
+.cl-evidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  padding: 1px 6px 1px 3px;
+  color: var(--cl-accent);
+  background: var(--cl-accent-glow);
+  border: 1px solid rgba(132, 129, 255, 0.2);
+  border-radius: 3px;
+  vertical-align: baseline;
+}
+.cl-evidence .num {
+  font-size: 9.5px;
+  padding: 0 3px;
+  background: rgba(132, 129, 255, 0.2);
+  border-radius: 2px;
+}

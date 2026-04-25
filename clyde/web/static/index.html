@@ -1,0 +1,1496 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clyde — Situation-Agnostic Economic Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'system-ui', 'sans-serif'],
+              mono: ['JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'monospace'],
+            },
+            colors: {
+              // Clyde near-monochrome canvas (dark theme)
+              bg: { DEFAULT: '#0A0B0D', soft: '#16181C', card: '#111215', border: '#1c1f24' },
+              // Restrained electric indigo. accent.glow is the lighter hover hue;
+              // accent.violet maps to accentDim for the "what-if" / fork CTA.
+              accent: { DEFAULT: '#8481FF', glow: '#A8A6FF', violet: '#6663D9' },
+            },
+            boxShadow: {
+              glow: '0 0 0 1px rgba(132,129,255,0.35), 0 10px 40px -10px rgba(132,129,255,0.45)',
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="/static/clyde-ui.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      .feed-enter { animation: feedSlide 0.3s ease-out; }
+      @keyframes feedSlide { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+      .split-panel { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,0.18) transparent; }
+    </style>
+  </head>
+  <body
+    class="min-h-screen bg-bg text-slate-100 font-sans antialiased selection:bg-accent/40"
+    x-data="clydeApp()"
+    x-init="init()"
+  >
+    <!-- ambient gradient — restrained indigo glows + dotted grid -->
+    <div class="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
+      <div
+        class="absolute -top-40 left-1/2 -translate-x-1/2 w-[1100px] h-[560px] rounded-full blur-3xl opacity-[0.18]"
+        style="background: radial-gradient(closest-side, #8481FF, transparent 70%);"
+      ></div>
+      <div
+        class="absolute top-[42rem] right-0 w-[640px] h-[480px] rounded-full blur-3xl opacity-[0.10]"
+        style="background: radial-gradient(closest-side, #6663D9, transparent 70%);"
+      ></div>
+      <div class="absolute inset-0 bg-grid"></div>
+    </div>
+
+    <!-- header — Clyde lockup left, provider StatusPill right -->
+    <header class="border-b border-bg-border/70 backdrop-blur-md bg-bg/60 sticky top-0 z-30">
+      <div class="max-w-7xl mx-auto px-6 h-[52px] flex items-center gap-4">
+        <div class="flex items-center gap-2.5">
+          <!-- Clyde mascot: pill body + chevron tail, eyes that blink, tiny forecast line -->
+          <svg viewBox="0 0 64 64" class="w-7 h-7" aria-label="Clyde">
+            <path
+              d="M32 6 C 18 6, 10 16, 10 30 L 10 48 L 16 44 L 22 48 L 28 44 L 34 48 L 40 44 L 46 48 L 52 44 L 54 48 L 54 30 C 54 16, 46 6, 32 6 Z"
+              fill="#8481FF"
+            />
+            <g class="cl-mascot-blink" style="transform-origin: 25px 26px;">
+              <circle cx="25" cy="26" r="4" fill="#0A0B0D" />
+              <circle cx="26" cy="25" r="1.4" fill="#F2F3F5" />
+            </g>
+            <g class="cl-mascot-blink" style="transform-origin: 41px 26px;">
+              <circle cx="41" cy="26" r="4" fill="#0A0B0D" />
+              <circle cx="42" cy="25" r="1.4" fill="#F2F3F5" />
+            </g>
+            <polyline
+              points="18,36 24,34 30,37 36,33 42,35 48,32"
+              fill="none"
+              stroke="#0A0B0D"
+              stroke-width="1.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              opacity="0.55"
+            />
+          </svg>
+          <div class="leading-tight">
+            <div class="text-[13px] font-semibold tracking-tight text-white">Clyde</div>
+            <div class="text-[10.5px] text-slate-400 mt-0.5 tracking-wide">Economic Simulator</div>
+          </div>
+        </div>
+        <div class="flex-1"></div>
+        <!-- provider StatusPill -->
+        <div class="flex items-center gap-2">
+          <template x-if="health">
+            <div class="cl-statuspill">
+              <span class="dot"
+                :style="health.provider === 'mock' ? 'background:#FBBF24' : 'background:#4ADE80'"></span>
+              <span class="text-slate-400">running on</span>
+              <span class="font-medium text-white" x-text="providerLabel(health.provider)"></span>
+              <template x-if="health.model">
+                <span class="text-slate-500 font-mono text-[10.5px]" x-text="'· ' + health.model"></span>
+              </template>
+            </div>
+          </template>
+          <template x-if="!health">
+            <div class="cl-statuspill">
+              <span class="dot" style="background:#72767E"></span>
+              <span class="text-slate-400">connecting…</span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-6 pb-32">
+      <!-- hero — animated mascot + restrained-indigo headline -->
+      <section class="pt-14 pb-10 text-center max-w-2xl mx-auto">
+        <div class="cl-mascot-float mb-5">
+          <svg viewBox="0 0 64 64" class="w-[44px] h-[44px]" aria-hidden="true">
+            <path
+              d="M32 6 C 18 6, 10 16, 10 30 L 10 48 L 16 44 L 22 48 L 28 44 L 34 48 L 40 44 L 46 48 L 52 44 L 54 48 L 54 30 C 54 16, 46 6, 32 6 Z"
+              fill="#8481FF"
+            />
+            <g class="cl-mascot-blink" style="transform-origin: 25px 26px;">
+              <circle cx="25" cy="26" r="4" fill="#0A0B0D" />
+              <circle cx="26" cy="25" r="1.4" fill="#F2F3F5" />
+            </g>
+            <g class="cl-mascot-blink" style="transform-origin: 41px 26px;">
+              <circle cx="41" cy="26" r="4" fill="#0A0B0D" />
+              <circle cx="42" cy="25" r="1.4" fill="#F2F3F5" />
+            </g>
+            <polyline
+              points="18,36 24,34 30,37 36,33 42,35 48,32"
+              fill="none" stroke="#0A0B0D" stroke-width="1.2"
+              stroke-linecap="round" stroke-linejoin="round" opacity="0.55"
+            />
+          </svg>
+        </div>
+        <div
+          class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-accent/10 border border-accent/25 text-accent-glow text-[11px] font-medium tracking-wide mb-5 font-mono"
+        >
+          <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+          situation-agnostic · agent-based · monte-carlo
+        </div>
+        <h1
+          class="text-[34px] md:text-[42px] font-semibold leading-[1.1] tracking-[-0.025em] text-white"
+        >
+          Simulate any economic shock,<br /><span class="text-slate-500">in plain English.</span>
+        </h1>
+        <p class="mt-4 text-slate-400 text-[14px] md:text-[15px] leading-relaxed max-w-lg mx-auto">
+          Describe a scenario. Clyde parses the shock, spawns actors, runs a Monte Carlo ensemble, and surfaces
+          fan-charted outcomes with traceable causal chains.
+        </p>
+      </section>
+
+      <!-- demo mode banner — warn tone, matches design system chip pattern -->
+      <template x-if="health && health.provider === 'mock'">
+        <div
+          class="mb-6 px-3.5 py-2.5 rounded-md border border-amber-500/30 bg-amber-500/[0.06] text-amber-200 text-[12.5px] flex items-center gap-2.5"
+        >
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3">
+            <path d="M6 2l5 8H1z" stroke-linejoin="round" />
+            <path d="M6 5v2.5M6 8.5v.5" stroke-linecap="round" />
+          </svg>
+          <span><span class="font-semibold">Demo Mode</span> — no LLM key configured. Outputs are stubbed for layout review.</span>
+        </div>
+      </template>
+
+      <!-- input — single hero card, parameter strip on the bottom edge -->
+      <section class="rounded-[10px] border border-white/10 bg-bg-card overflow-hidden">
+        <div class="flex items-center justify-between px-5 pt-4 pb-2">
+          <label class="text-[10.5px] font-medium uppercase tracking-[0.08em] text-slate-500">Scenario</label>
+          <select
+            class="text-[11px] bg-bg-soft border border-bg-border rounded-md px-2.5 py-1 text-slate-300 focus:outline-none focus:ring-1 focus:ring-accent/50"
+            @change="loadSample($event.target.value); $event.target.value=''"
+            :disabled="loading"
+          >
+            <option value="">Try a sample scenario…</option>
+            <template x-for="s in samples" :key="s.name">
+              <option :value="s.name" x-text="s.name"></option>
+            </template>
+          </select>
+        </div>
+        <div class="px-5 pb-3 flex gap-2.5 items-start">
+          <!-- The leading dot turns red and pulses while voice is live so the
+               audience can see at a glance that the textarea is the mic transcript. -->
+          <span class="mt-2.5 w-1.5 h-1.5 rounded-full shrink-0 transition-colors"
+            :class="voiceState === 'listening' ? 'bg-red-400' : 'bg-accent'"
+            :style="voiceState === 'listening' ? 'animation: cl-pulse 0.7s ease-in-out infinite' : ''"></span>
+          <div class="flex-1 min-w-0">
+            <textarea
+              x-model="description"
+              @keydown.meta.enter.prevent="run()"
+              @keydown.ctrl.enter.prevent="run()"
+              rows="3"
+              :placeholder="voiceState === 'listening' ? 'Listening… speak now (click Stop · listening when done).' : 'Describe an event — e.g. an AWS us-east-1 outage from a DynamoDB DNS race condition…'"
+              class="w-full bg-transparent text-slate-100 placeholder-slate-600 text-[15px] leading-[1.55] focus:outline-none resize-none"
+            ></textarea>
+            <div class="font-mono text-[10px] text-red-300/80 -mt-1 flex items-center gap-1.5"
+              x-show="voiceState === 'listening' || voiceState === 'transcribing'" x-transition.opacity>
+              <svg class="w-2.5 h-2.5" viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="3"/></svg>
+              <span x-text="voiceState === 'listening' ? 'live transcript · ElevenLabs voice pipeline' : 'finalizing transcript…'"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Multi-modal input: text (above) · voice · doc upload.
+             All three funnel into the same demo — input is just a contextual on-ramp. -->
+        <div class="px-5 pb-3 flex flex-wrap items-center gap-2">
+          <span class="font-mono text-[10px] text-slate-500 uppercase tracking-[0.08em] mr-1">or</span>
+          <!-- Voice input — real mic via Web Speech API, click toggles
+               start/stop. Listening state stays clickable so the user
+               can stop on demand; live transcript flows into the textarea above. -->
+          <button @click="startVoiceInput()" :disabled="voiceState === 'transcribing'"
+            class="inline-flex items-center gap-2 h-8 px-3 rounded-md border text-[12px] transition disabled:opacity-60"
+            :class="voiceState === 'listening' ? 'border-red-500/40 bg-red-500/[0.10] text-red-300 hover:bg-red-500/15' : 'border-bg-border bg-bg-soft text-slate-300 hover:text-white hover:border-white/15'">
+            <template x-if="voiceState === 'idle'">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="6" y="2" width="4" height="8" rx="2"/>
+                <path d="M3 8a5 5 0 0010 0M8 13v2" stroke-linecap="round"/>
+              </svg>
+            </template>
+            <template x-if="voiceState === 'listening'">
+              <span class="flex items-center gap-1">
+                <span class="w-1 h-3 bg-red-400 rounded-sm" style="animation: cl-pulse 0.6s ease-in-out infinite"></span>
+                <span class="w-1 h-4 bg-red-400 rounded-sm" style="animation: cl-pulse 0.7s ease-in-out infinite 0.1s"></span>
+                <span class="w-1 h-3 bg-red-400 rounded-sm" style="animation: cl-pulse 0.5s ease-in-out infinite 0.2s"></span>
+              </span>
+            </template>
+            <template x-if="voiceState === 'transcribing'">
+              <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-opacity="0.3"/>
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              </svg>
+            </template>
+            <span x-text="voiceState === 'listening' ? 'Stop · listening' : voiceState === 'transcribing' ? 'Transcribing…' : 'Voice'"></span>
+            <span class="font-mono text-[9.5px] text-slate-500 uppercase tracking-wide" x-show="voiceState === 'idle'">ElevenLabs</span>
+          </button>
+
+          <!-- Doc upload -->
+          <button @click="$refs.docFileInput.click()" :disabled="uploadState !== 'idle'"
+            class="inline-flex items-center gap-2 h-8 px-3 rounded-md border border-bg-border bg-bg-soft text-slate-300 hover:text-white hover:border-white/15 text-[12px] transition disabled:opacity-60">
+            <template x-if="uploadState === 'idle'">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 2H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1V6"/>
+                <path d="M9 2v4h4M9 2l4 4M7 10v-3M5 9l2-2 2 2"/>
+              </svg>
+            </template>
+            <template x-if="uploadState === 'ingesting'">
+              <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-opacity="0.3"/>
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              </svg>
+            </template>
+            <span x-text="uploadState === 'ingesting' ? 'Ingesting…' : (uploadedDocName || 'Upload doc')"></span>
+            <span class="font-mono text-[9.5px] text-slate-500" x-show="uploadState === 'idle' && !uploadedDocName">PDF · MD · TXT</span>
+          </button>
+          <input type="file" x-ref="docFileInput" @change="handleDocUpload($event)" class="hidden" accept=".pdf,.txt,.md,.doc,.docx,.html,.json"/>
+
+          <span class="flex-1"></span>
+          <span class="font-mono text-[10px] text-slate-500 uppercase tracking-[0.08em]" x-show="voiceState !== 'idle' || uploadState !== 'idle'">
+            Mock simulator will play the AWS us-east-1 incident
+          </span>
+        </div>
+        <!-- bottom strip: tabular params + Run -->
+        <div class="border-t border-bg-border bg-[#07080A] px-4 py-2.5 flex flex-wrap items-center gap-2">
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-500">
+            Runs
+            <input
+              type="number" min="1" max="500"
+              x-model.number="runCount"
+              class="w-12 bg-bg-soft border border-bg-border rounded px-1.5 py-0.5 text-center text-slate-200 text-[11px] font-mono"
+            />
+          </label>
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-500">
+            Seed
+            <input
+              type="number"
+              x-model.number="rngSeed"
+              class="w-16 bg-bg-soft border border-bg-border rounded px-1.5 py-0.5 text-center text-slate-200 text-[11px] font-mono"
+            />
+          </label>
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-500">
+            Horizon
+            <input
+              type="number" min="1" max="500" placeholder="auto"
+              x-model.number="horizonSteps"
+              class="w-16 bg-bg-soft border border-bg-border rounded px-1.5 py-0.5 text-center text-slate-200 text-[11px] font-mono"
+            />
+          </label>
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-500 ml-1">
+            <input type="checkbox" x-model="useAnalogs" class="accent-accent" />
+            Use analog memory
+          </label>
+          <div class="flex-1"></div>
+          <!-- Hackathon: zero-friction "Try demo" — runs the scripted client-side flow,
+               great for judges who want to see Ontology → Setup → Simulation in 25s. -->
+          <button
+            @click="runDemoFlow()"
+            class="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-accent/30 bg-accent/[0.08] text-accent-glow font-medium text-[12px] hover:bg-accent/15 transition"
+            title="Run a scripted demo (no backend needed)"
+          >
+            <svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M3 2l7 4-7 4z"/></svg>
+            Try demo
+          </button>
+          <button
+            @click="run()"
+            :disabled="loading || !description.trim()"
+            class="group relative inline-flex items-center gap-2 px-4 h-8 rounded-md bg-accent hover:bg-accent-glow text-white font-medium text-[12.5px] disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            <template x-if="!loading">
+              <span class="flex items-center gap-2">
+                <svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+                  <path d="M3 2l7 4-7 4z" />
+                </svg>
+                Run simulation
+                <kbd class="px-1.5 py-px rounded text-[10px] font-mono border border-white/20 text-white/80">⌘↵</kbd>
+              </span>
+            </template>
+            <template x-if="loading">
+              <span class="flex items-center gap-2">
+                <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-opacity="0.3" />
+                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+                </svg>
+                Running…
+              </span>
+            </template>
+          </button>
+        </div>
+      </section>
+
+      <!-- example chips — quick scenario seeds -->
+      <template x-if="!result && !loading && samples.length">
+        <div class="mt-4 flex flex-wrap gap-1.5 justify-center">
+          <template x-for="s in samples.slice(0, 4)" :key="s.name">
+            <button class="cl-chip"
+              @click="loadSample(s.name)"
+              :disabled="loading"
+              x-text="s.name"></button>
+          </template>
+        </div>
+      </template>
+
+      <!-- pipeline progress — design's step-rail with marker glyphs + ProgressRail bar -->
+      <template x-if="loading || (job && job.status !== 'completed' && job.status !== 'failed')">
+        <section class="mt-6 rounded-lg border border-bg-border bg-bg-card overflow-hidden">
+          <div class="grid grid-cols-1 md:grid-cols-3">
+            <!-- Left: aggregate progress + scenario echo -->
+            <div class="md:col-span-1 px-5 py-4 border-b md:border-b-0 md:border-r border-bg-border bg-[#07080A]">
+              <div class="text-[10.5px] font-medium uppercase tracking-[0.08em] text-slate-500 mb-2">Pipeline</div>
+              <div class="text-[13px] font-semibold text-white" x-text="progressStage()"></div>
+              <div class="mt-1 text-[11px] text-slate-500 font-mono" x-text="progressPercent() + '% · ' + (job?.status || 'queued')"></div>
+              <div class="mt-3 h-[2px] rounded-full bg-[#0A0B0D] overflow-hidden relative">
+                <div class="h-full bg-accent transition-all duration-500 ease-out" :style="`width: ${progressPercent()}%`"></div>
+                <div class="absolute inset-0 progress-shimmer"></div>
+              </div>
+              <div class="mt-4 text-[11px] text-slate-500 leading-relaxed line-clamp-3" x-text="description || '—'"></div>
+            </div>
+            <!-- Right: stage rail rendered by ClydeUI.stepRail() -->
+            <div class="md:col-span-2 py-2" x-html="pipelineRailHTML()"></div>
+          </div>
+        </section>
+      </template>
+
+      <!-- results — Simulation-screen layout: metric strip → fan chart + divergence rail → tabs -->
+      <template x-if="result">
+        <section class="mt-8 space-y-5 result-fade">
+
+          <!-- metric strip — six fields, mono values, full-bleed -->
+          <div class="rounded-lg border border-bg-border bg-bg-card overflow-hidden">
+            <div class="grid grid-cols-3 md:grid-cols-6 divide-x divide-bg-border">
+              <template x-for="m in metricStrip()" :key="m.l">
+                <div class="px-4 py-3">
+                  <div class="text-[9.5px] text-slate-500 uppercase tracking-[0.08em]" x-text="m.l"></div>
+                  <div class="font-mono text-[14.5px] font-medium mt-1 truncate"
+                       :class="m.tone === 'accent' ? 'text-accent-glow' : m.tone === 'warn' ? 'text-amber-300' : m.tone === 'positive' ? 'text-emerald-300' : 'text-white'"
+                       :title="m.v" x-text="m.v"></div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- charts row -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <!-- fan chart -->
+            <div class="lg:col-span-8 rounded-lg border border-bg-border bg-bg-card overflow-hidden">
+              <div class="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-bg-border">
+                <div>
+                  <div class="text-[12.5px] font-semibold text-white tracking-tight">Outcome distribution</div>
+                  <div class="text-[11px] text-slate-500 mt-0.5">Central path with 50 / 80 / 95 bands and tail extremes</div>
+                </div>
+                <select
+                  x-model="selectedMetric"
+                  @change="renderFanChart()"
+                  class="text-[11px] bg-bg-soft border border-bg-border rounded-md px-2.5 py-1 text-slate-200 focus:outline-none focus:ring-1 focus:ring-accent/50 font-mono"
+                >
+                  <template x-for="m in availableMetrics()" :key="m">
+                    <option :value="m" x-text="prettyMetric(m)"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="p-5">
+                <div x-ref="fanHost" class="relative w-full" style="height:320px"></div>
+                <!-- design-spec legend: colored bands sample, branch overlays, mono callout -->
+                <div class="mt-3 pt-3 border-t border-bg-border flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-slate-400">
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-[2px]" style="background:#E8E9ED"></span> central</span>
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-2 rounded-sm" style="background:rgba(132,129,255,0.28)"></span> 50%</span>
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-2 rounded-sm" style="background:rgba(132,129,255,0.16)"></span> 80%</span>
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-2 rounded-sm" style="background:rgba(132,129,255,0.08)"></span> 95%</span>
+                  <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-px" style="background:rgba(255,255,255,0.18)"></span> tails</span>
+                  <template x-for="b in branches" :key="b.branch_id">
+                    <span class="flex items-center gap-1.5 font-mono">
+                      <span class="inline-block w-3 border-t border-dashed" :style="`border-color: ${b.color}; border-top-width:1.5px`"></span>
+                      <span x-text="'branch · ' + b.label"></span>
+                    </span>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- divergence drivers — heatmap, plus calibration legend -->
+            <div class="lg:col-span-4 rounded-lg border border-bg-border bg-bg-card overflow-hidden">
+              <div class="px-5 py-3.5 border-b border-bg-border">
+                <div class="text-[12.5px] font-semibold text-white tracking-tight">Divergence drivers</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">Variables most driving the spread of outcomes</div>
+              </div>
+              <div class="p-4">
+                <div x-ref="divHost" class="relative w-full" style="min-height:200px"></div>
+                <div class="flex items-center justify-between mt-3 text-[10px] text-slate-500 font-mono">
+                  <span>low</span>
+                  <div class="flex h-1.5 w-24">
+                    <div class="flex-1" style="background:rgba(132,129,255,0.20)"></div>
+                    <div class="flex-1" style="background:rgba(160,150,210,0.30)"></div>
+                    <div class="flex-1" style="background:rgba(200,170,150,0.45)"></div>
+                    <div class="flex-1" style="background:rgba(230,185,90,0.65)"></div>
+                    <div class="flex-1" style="background:rgba(251,191,36,0.80)"></div>
+                  </div>
+                  <span>high</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- tabs — design pattern: underline accent, no rounded fill -->
+          <div class="rounded-lg border border-bg-border bg-bg-card overflow-hidden">
+            <div class="flex border-b border-bg-border overflow-x-auto">
+              <template x-for="t in tabs" :key="t.key">
+                <button
+                  @click="activeTab = t.key"
+                  class="px-4 py-2.5 text-[12.5px] font-medium whitespace-nowrap transition relative -mb-px tracking-tight"
+                  :class="activeTab === t.key ? 'text-white border-b-[1.5px] border-accent' : 'text-slate-500 hover:text-slate-300 border-b-[1.5px] border-transparent'"
+                >
+                  <span x-text="t.label"></span>
+                </button>
+              </template>
+            </div>
+
+            <!-- report -->
+            <div x-show="activeTab === 'report'" class="p-6">
+              <template x-if="result.report">
+                <div>
+                  <template x-if="result.report.uncertainty_flags && result.report.uncertainty_flags.length">
+                    <div class="mb-4 flex flex-wrap gap-2">
+                      <template x-for="f in result.report.uncertainty_flags" :key="f">
+                        <span class="px-2 py-0.5 rounded-full text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-200">
+                          ⚑ <span x-text="f"></span>
+                        </span>
+                      </template>
+                    </div>
+                  </template>
+                  <div class="prose-clyde max-w-none">
+                    <template x-for="(s, i) in (result.report.sections || [])" :key="i">
+                      <div class="mb-6">
+                        <h2 class="text-lg font-semibold text-white mb-2" x-text="s.heading"></h2>
+                        <div class="text-slate-300 leading-relaxed text-[15px]" x-html="renderMd(s.body)"></div>
+                        <template x-if="s.flags && s.flags.length">
+                          <div class="mt-2 flex flex-wrap gap-1.5">
+                            <template x-for="f in s.flags" :key="f">
+                              <span class="px-2 py-0.5 rounded text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-200" x-text="'⚑ ' + f"></span>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="s.provenance && s.provenance.length">
+                          <details class="mt-2 text-xs text-slate-500">
+                            <summary class="cursor-pointer hover:text-slate-300">provenance</summary>
+                            <ul class="mt-1 ml-4 list-disc">
+                              <template x-for="p in s.provenance" :key="p">
+                                <li x-text="p"></li>
+                              </template>
+                            </ul>
+                          </details>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!result.report">
+                <div class="text-slate-500 text-sm italic">No report generated.</div>
+              </template>
+            </div>
+
+            <!-- actor profiles -->
+            <div x-show="activeTab === 'actors'" class="p-6">
+              <template x-if="result.personas && result.personas.length">
+                <div>
+                  <div class="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 class="text-sm font-semibold text-white">LLM-Generated Economic Personas</h3>
+                      <p class="text-xs text-slate-500">Rich narrative identities grounded in each actor's empirical behavioral parameters from the Prior Library.</p>
+                    </div>
+                    <div class="flex items-center gap-2 text-[11px]">
+                      <span class="text-slate-400" x-text="result.personas.length + ' actors profiled'"></span>
+                      <select x-model="personaFilter" class="text-xs bg-bg-soft border border-bg-border rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-accent/50">
+                        <option value="all">All types</option>
+                        <option value="household">Households</option>
+                        <option value="firm">Firms</option>
+                        <option value="bank">Banks</option>
+                        <option value="central_bank">Central Bank</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <template x-for="p in filteredPersonas()" :key="p.actor_id">
+                      <div class="rounded-xl border border-bg-border bg-bg-soft/60 p-4 hover:border-accent/30 transition cursor-pointer"
+                           @click="selectedNode = (result.network?.nodes || []).find(n => n.id === p.actor_id); activeTab = 'network'">
+                        <div class="flex items-start gap-3 mb-2">
+                          <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+                            :style="'background:' + personaColor(p.actor_type) + '22; color:' + personaColor(p.actor_type)">
+                            <span x-text="p.display_name.charAt(0)"></span>
+                          </div>
+                          <div class="min-w-0">
+                            <div class="text-sm font-semibold text-white truncate" x-text="p.display_name"></div>
+                            <div class="text-[11px] text-slate-400" x-text="p.role"></div>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-1.5 mb-2">
+                          <span class="px-2 py-0.5 rounded-full text-[10px] font-medium border"
+                            :class="nodeTypeBadgeClass(p.actor_type)"
+                            x-text="nodeTypeLabel(p.actor_type)"></span>
+                          <span class="text-[10px] text-slate-600 font-mono" x-text="p.actor_id"></span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed mb-2" x-text="p.description"></p>
+                        <div class="text-[11px] text-slate-500 mb-1">
+                          <span class="text-slate-400 font-medium">Behavior:</span>
+                          <span x-text="p.economic_behavior"></span>
+                        </div>
+                        <div class="text-[11px] text-red-400/80 mb-2">
+                          <span class="text-red-400 font-medium">Vulnerability:</span>
+                          <span x-text="p.vulnerability"></span>
+                        </div>
+                        <div class="flex flex-wrap gap-1">
+                          <template x-for="tag in (p.tags || [])" :key="tag">
+                            <span class="px-1.5 py-0.5 rounded text-[9px] bg-accent/10 border border-accent/20 text-accent-glow" x-text="tag"></span>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!result.personas || !result.personas.length">
+                <div class="text-slate-500 text-sm italic">No actor personas generated.</div>
+              </template>
+            </div>
+
+            <!-- influence config -->
+            <div x-show="activeTab === 'influence'" class="p-6">
+              <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div class="lg:col-span-7">
+                  <h3 class="text-sm font-semibold text-white mb-1">Economic Influence Propagation</h3>
+                  <p class="text-xs text-slate-500 mb-4">How economic signals travel through the actor network — the economic equivalent of a recommendation algorithm. LLM-configured per scenario.</p>
+                  <div class="space-y-3">
+                    <template x-for="(val, key) in (result.influence_config || {})" :key="key">
+                      <div class="rounded-lg border border-bg-border bg-bg-soft/60 p-3">
+                        <div class="flex items-center justify-between mb-1.5">
+                          <span class="text-xs text-slate-300 font-medium" x-text="influenceLabel(key)"></span>
+                          <span class="text-xs font-semibold tabular-nums text-white" x-text="(typeof val === 'number' ? val.toFixed(2) : val)"></span>
+                        </div>
+                        <div class="h-2 rounded-full bg-bg-card overflow-hidden">
+                          <div class="h-full rounded-full transition-all duration-500"
+                            :style="'width:' + (typeof val === 'number' ? (val * 100) : 0) + '%; background: linear-gradient(90deg, #3b82f6, #7c3aed)'"></div>
+                        </div>
+                        <div class="text-[10px] text-slate-600 mt-1" x-text="influenceDescription(key)"></div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                <div class="lg:col-span-5">
+                  <h3 class="text-sm font-semibold text-white mb-1">LLM Reasoning</h3>
+                  <p class="text-xs text-slate-500 mb-4">Why these weights were chosen for this specific scenario.</p>
+                  <div class="rounded-xl border border-bg-border bg-bg-soft/60 p-4">
+                    <template x-if="result.influence_reasoning">
+                      <div class="text-sm text-slate-300 leading-relaxed" x-html="renderMd(result.influence_reasoning)"></div>
+                    </template>
+                    <template x-if="!result.influence_reasoning">
+                      <div class="text-slate-500 text-sm italic">Default configuration used.</div>
+                    </template>
+                  </div>
+                  <!-- channel diagram -->
+                  <div class="mt-4 rounded-xl border border-bg-border bg-bg-soft/60 p-4">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Transmission Channels</div>
+                    <div class="space-y-2 text-xs">
+                      <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-purple-400"></span><span class="text-slate-300">Central Bank</span><span class="text-slate-600">→ policy rate →</span><span class="text-slate-300">Banks</span><span class="text-slate-600">(monetary channel)</span></div>
+                      <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><span class="text-slate-300">Banks</span><span class="text-slate-600">→ credit tightening →</span><span class="text-slate-300">Firms</span><span class="text-slate-600">(credit channel)</span></div>
+                      <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-blue-400"></span><span class="text-slate-300">Firms</span><span class="text-slate-600">→ prices, hiring →</span><span class="text-slate-300">Households</span><span class="text-slate-600">(real economy)</span></div>
+                      <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span class="text-slate-300">Households</span><span class="text-slate-600">→ expectations →</span><span class="text-slate-300">All actors</span><span class="text-slate-600">(confidence channel)</span></div>
+                      <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-red-400"></span><span class="text-slate-300">Banks</span><span class="text-slate-600">→ interbank stress →</span><span class="text-slate-300">Banks</span><span class="text-slate-600">(contagion channel)</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- causal chains -->
+            <div x-show="activeTab === 'causal'" class="p-6">
+              <template x-if="result.causal_chains && result.causal_chains.length">
+                <div class="space-y-4">
+                  <template x-for="(c, i) in result.causal_chains" :key="c.chain_id || i">
+                    <div class="rounded-xl border border-bg-border bg-bg-soft/60 p-4">
+                      <div class="flex items-center justify-between mb-3">
+                        <div class="text-sm font-semibold text-white">
+                          Chain <span class="text-slate-500" x-text="c.chain_id || ('#' + (i+1))"></span>
+                        </div>
+                        <div class="text-[11px] text-slate-400">
+                          origin: <span class="text-slate-200" x-text="c.origin_shock || '—'"></span>
+                          <span class="mx-2">·</span>
+                          magnitude: <span class="text-slate-200 tabular-nums" x-text="(c.total_magnitude || 0).toFixed(2)"></span>
+                        </div>
+                      </div>
+                      <ol class="space-y-2">
+                        <template x-for="(ev, j) in (c.events || [])" :key="j">
+                          <li class="flex gap-3">
+                            <div class="flex flex-col items-center">
+                              <div class="w-6 h-6 rounded-full bg-accent/20 border border-accent/40 text-accent-glow text-[11px] flex items-center justify-center font-semibold" x-text="j+1"></div>
+                              <div class="flex-1 w-px bg-bg-border my-1" x-show="j < (c.events.length - 1)"></div>
+                            </div>
+                            <div class="flex-1 pb-2">
+                              <div class="text-sm text-slate-100" x-text="eventTitle(ev)"></div>
+                              <div class="text-xs text-slate-500 mt-0.5" x-text="eventDetail(ev)"></div>
+                            </div>
+                          </li>
+                        </template>
+                      </ol>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!result.causal_chains || !result.causal_chains.length">
+                <div class="text-slate-500 text-sm italic">No causal chains recorded.</div>
+              </template>
+            </div>
+
+            <!-- watchlist — design's leading-indicators pattern -->
+            <div x-show="activeTab === 'watchlist'" class="p-5">
+              <div class="mb-3">
+                <div class="text-[12.5px] font-semibold text-white tracking-tight">Leading indicators</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">Watchlist · these are what to monitor going forward</div>
+              </div>
+              <template x-if="result.watchlist && (result.watchlist.length || (result.watchlist.indicators && result.watchlist.indicators.length))">
+                <div>
+                  <template x-for="(w, i) in watchlistItems()" :key="i">
+                    <div class="grid grid-cols-[1fr_auto] items-center gap-3 py-2.5 border-b border-bg-border last:border-b-0">
+                      <div>
+                        <div class="font-mono text-[12px] text-slate-200" x-text="w.name || w.indicator || w.label || w"></div>
+                        <div class="text-[11px] text-slate-500 mt-0.5" x-text="w.description || w.detail || ''"></div>
+                      </div>
+                      <template x-if="w.priority || w.severity">
+                        <span class="font-mono text-[10px] tracking-wide px-2 py-0.5 rounded border border-accent/25 bg-accent/[0.06] text-accent-glow uppercase" x-text="w.priority || w.severity"></span>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!result.watchlist || (!result.watchlist.length && !(result.watchlist.indicators && result.watchlist.indicators.length))">
+                <div class="text-slate-500 text-[12.5px] italic">No watchlist generated.</div>
+              </template>
+            </div>
+
+            <!-- network graph -->
+            <div x-show="activeTab === 'network'" class="p-6">
+              <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <div>
+                  <h3 class="text-sm font-semibold text-white">Actor network</h3>
+                  <p class="text-xs text-slate-500">Click any node to inspect its economic parameters, relationships, and role in the simulation.</p>
+                </div>
+                <div class="flex items-center gap-3 text-[11px] text-slate-400">
+                  <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-emerald-400"></span> Household</span>
+                  <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-blue-400"></span> Firm</span>
+                  <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-amber-400"></span> Bank</span>
+                  <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-purple-400"></span> Central Bank</span>
+                  <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></span> Shocked</span>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 lg:grid-cols-12 gap-0 rounded-xl border border-bg-border overflow-hidden bg-bg-soft/40" style="height:540px">
+                <!-- graph canvas -->
+                <div class="lg:col-span-8 relative h-full">
+                  <svg x-ref="networkSvg" class="w-full h-full"></svg>
+                </div>
+                <!-- detail panel -->
+                <div class="lg:col-span-4 border-l border-bg-border bg-bg-card/80 overflow-y-auto h-full">
+                  <template x-if="!selectedNode">
+                    <div class="flex flex-col items-center justify-center h-full text-center px-6">
+                      <svg class="w-10 h-10 text-slate-600 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35" stroke-linecap="round"/>
+                      </svg>
+                      <div class="text-sm text-slate-400">Click a node to inspect</div>
+                      <div class="text-xs text-slate-600 mt-1">View actor parameters, connections, and economic role</div>
+                    </div>
+                  </template>
+                  <template x-if="selectedNode">
+                    <div class="p-4">
+                      <!-- header -->
+                      <div class="flex items-start justify-between mb-4">
+                        <div>
+                          <div class="text-lg font-semibold text-white" x-text="nodeDisplayName(selectedNode)"></div>
+                          <div class="flex items-center gap-2 mt-1">
+                            <span class="px-2 py-0.5 rounded-full text-[11px] font-medium border"
+                              :class="nodeTypeBadgeClass(selectedNode.type)"
+                              x-text="nodeTypeLabel(selectedNode.type)"></span>
+                            <template x-if="selectedNode.shocked">
+                              <span class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-500/15 border border-red-500/40 text-red-300">⚡ Initial shock</span>
+                            </template>
+                          </div>
+                        </div>
+                        <button @click="selectedNode = null" class="text-slate-500 hover:text-white transition p-1">
+                          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12" stroke-linecap="round"/></svg>
+                        </button>
+                      </div>
+
+                      <!-- ID -->
+                      <div class="mb-4 px-3 py-2 rounded-lg bg-bg-soft border border-bg-border">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-500">Actor ID</div>
+                        <div class="text-sm text-slate-200 font-mono mt-0.5" x-text="selectedNode.id"></div>
+                      </div>
+
+                      <!-- behavioral parameters -->
+                      <div class="mb-4">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Behavioral Parameters</div>
+                        <div class="space-y-1">
+                          <template x-for="(val, key) in (selectedNode.params || {})" :key="key">
+                            <div class="flex items-center justify-between px-3 py-1.5 rounded-lg bg-bg-soft/60 border border-bg-border/50 hover:border-accent/30 transition">
+                              <span class="text-xs text-slate-400" x-text="paramLabel(key)"></span>
+                              <span class="text-xs font-semibold tabular-nums text-slate-200" x-text="formatParamValue(val)"></span>
+                            </div>
+                          </template>
+                        </div>
+                        <template x-if="!selectedNode.params || !Object.keys(selectedNode.params).length">
+                          <div class="text-xs text-slate-600 italic px-3">No parameters available</div>
+                        </template>
+                      </div>
+
+                      <!-- connections -->
+                      <div class="mb-4">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                          Connections
+                          <span class="text-slate-600 font-normal" x-text="'(' + nodeConnections(selectedNode).length + ')'"></span>
+                        </div>
+                        <div class="space-y-1 max-h-[180px] overflow-y-auto">
+                          <template x-for="(conn, i) in nodeConnections(selectedNode)" :key="i">
+                            <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-bg-soft/60 border border-bg-border/50 cursor-pointer hover:border-accent/30 transition"
+                                 @click="selectNodeById(conn.peer)">
+                              <span class="w-2 h-2 rounded-full shrink-0" :style="'background:' + connColor(conn.edgeType)"></span>
+                              <div class="flex-1 min-w-0">
+                                <div class="text-xs text-slate-300 truncate" x-text="conn.peer"></div>
+                                <div class="text-[10px] text-slate-500" x-text="conn.direction + ' · ' + conn.edgeType + (conn.relType ? ' (' + conn.relType + ')' : '')"></div>
+                              </div>
+                              <svg class="w-3 h-3 text-slate-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </div>
+                          </template>
+                        </div>
+                        <template x-if="!nodeConnections(selectedNode).length">
+                          <div class="text-xs text-slate-600 italic px-3">No connections</div>
+                        </template>
+                      </div>
+
+                      <!-- causal involvement -->
+                      <div>
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Causal Involvement</div>
+                        <template x-if="nodeCausalEvents(selectedNode).length">
+                          <div class="space-y-1 max-h-[160px] overflow-y-auto">
+                            <template x-for="(ev, i) in nodeCausalEvents(selectedNode)" :key="i">
+                              <div class="px-3 py-1.5 rounded-lg bg-bg-soft/60 border border-bg-border/50">
+                                <div class="flex items-center justify-between">
+                                  <span class="text-[10px] text-slate-500">Step <span x-text="ev.step"></span></span>
+                                  <span class="text-[10px] px-1.5 py-0.5 rounded border"
+                                    :class="ev.source_actor_id === selectedNode.id ? 'border-red-500/30 bg-red-500/10 text-red-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'"
+                                    x-text="ev.source_actor_id === selectedNode.id ? 'source' : 'target'"></span>
+                                </div>
+                                <div class="text-xs text-slate-300 mt-0.5" x-text="ev.source_actor_id + ' → ' + ev.target_actor_id"></div>
+                                <div class="text-[10px] text-slate-500 mt-0.5" x-text="ev.channel + ' · ' + ev.variable_affected + ' · mag ' + (ev.magnitude >= 0 ? '+' : '') + ev.magnitude.toFixed(3)"></div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="!nodeCausalEvents(selectedNode).length">
+                          <div class="text-xs text-slate-600 italic px-3">No causal events involving this actor</div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- simulation replay -->
+            <div x-show="activeTab === 'simulation'" class="p-6">
+              <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <div>
+                  <h3 class="text-sm font-semibold text-white">Simulation replay</h3>
+                  <p class="text-xs text-slate-500">Step through the simulation. Click nodes to inspect. Watch the shock propagate and metrics evolve.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                  <button @click="simPrev()" :disabled="simStep <= 0" class="px-2 py-1 rounded bg-bg-soft border border-bg-border text-slate-300 text-xs disabled:opacity-30">◀</button>
+                  <span class="text-sm font-mono text-slate-200 tabular-nums w-24 text-center">Step <span x-text="simStep"></span> / <span x-text="simMaxStep()"></span></span>
+                  <button @click="simNext()" :disabled="simStep >= simMaxStep()" class="px-2 py-1 rounded bg-bg-soft border border-bg-border text-slate-300 text-xs disabled:opacity-30">▶</button>
+                  <button @click="simPlay()" class="px-3 py-1 rounded text-xs font-semibold transition" :class="simPlaying ? 'bg-red-500/20 border border-red-500/40 text-red-300' : 'bg-accent/20 border border-accent/40 text-accent-glow'">
+                    <span x-text="simPlaying ? '⏸ Pause' : '▶ Play'"></span>
+                  </button>
+                  <label class="flex items-center gap-1 text-xs text-slate-400">
+                    Speed
+                    <input type="range" min="100" max="2000" step="100" x-model.number="simSpeed" class="w-20 accent-accent">
+                    <span class="tabular-nums w-12" x-text="simSpeed + 'ms'"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 lg:grid-cols-12 gap-0 rounded-xl border border-bg-border overflow-hidden bg-bg-soft/40" style="height:480px">
+                <!-- sim graph -->
+                <div class="lg:col-span-7 relative h-full border-r border-bg-border">
+                  <svg x-ref="simSvg" class="w-full h-full"></svg>
+                </div>
+                <!-- sim right panel -->
+                <div class="lg:col-span-5 overflow-y-auto h-full bg-bg-card/60">
+                  <!-- clicked node detail in sim -->
+                  <template x-if="simSelectedNode">
+                    <div class="p-4 border-b border-bg-border">
+                      <div class="flex items-start justify-between mb-2">
+                        <div>
+                          <div class="text-sm font-semibold text-white" x-text="nodeDisplayName(simSelectedNode)"></div>
+                          <span class="px-2 py-0.5 rounded-full text-[10px] font-medium border"
+                            :class="nodeTypeBadgeClass(simSelectedNode.type)"
+                            x-text="nodeTypeLabel(simSelectedNode.type)"></span>
+                        </div>
+                        <button @click="simSelectedNode = null" class="text-slate-500 hover:text-white p-1">
+                          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12" stroke-linecap="round"/></svg>
+                        </button>
+                      </div>
+                      <div class="grid grid-cols-2 gap-1.5">
+                        <template x-for="(val, key) in (simSelectedNode.params || {})" :key="key">
+                          <div class="px-2 py-1 rounded bg-bg-soft/60 border border-bg-border/50">
+                            <div class="text-[9px] text-slate-500 truncate" x-text="paramLabel(key)"></div>
+                            <div class="text-[11px] font-semibold tabular-nums text-slate-200" x-text="formatParamValue(val)"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                  <!-- live metrics at current step -->
+                  <div class="p-4 border-b border-bg-border">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Metrics at step <span x-text="simStep"></span></div>
+                    <div class="grid grid-cols-3 gap-2">
+                      <template x-for="m in simMetricNames()" :key="m">
+                        <div class="px-2 py-1.5 rounded border border-bg-border bg-bg-soft/60 text-center">
+                          <div class="text-[10px] text-slate-500 truncate" x-text="prettyMetric(m)"></div>
+                          <div class="text-sm font-semibold tabular-nums" :class="simMetricColor(m)" x-text="simMetricValue(m)"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <!-- causal events at current step -->
+                  <div class="p-4">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Events at step <span x-text="simStep"></span></div>
+                    <template x-if="simEventsAtStep().length">
+                      <div class="space-y-1.5">
+                        <template x-for="(ev, i) in simEventsAtStep()" :key="i">
+                          <div class="flex items-start gap-2 text-xs px-2 py-1.5 rounded bg-bg-soft/40 border border-bg-border/50">
+                            <span class="mt-0.5 w-1.5 h-1.5 rounded-full bg-red-400 shrink-0"></span>
+                            <div class="flex-1 min-w-0">
+                              <div class="text-slate-300 truncate" x-text="ev.source_actor_id + ' → ' + ev.target_actor_id"></div>
+                              <div class="text-[10px] text-slate-500" x-text="ev.channel + ' · ' + ev.variable_affected + ' · ' + (ev.magnitude >= 0 ? '+' : '') + ev.magnitude.toFixed(3)"></div>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <template x-if="!simEventsAtStep().length">
+                      <div class="text-slate-600 text-xs italic">No causal events at this step.</div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- branches -->
+            <div x-show="activeTab === 'branches'" class="p-6">
+              <template x-if="branches.length">
+                <div class="space-y-3">
+                  <template x-for="b in branches" :key="b.branch_id">
+                    <div class="rounded-xl border border-bg-border bg-bg-soft/60 p-4">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="w-2.5 h-2.5 rounded-full" :style="`background:${b.color}`"></span>
+                        <span class="text-sm font-semibold text-white" x-text="b.label"></span>
+                        <span class="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full"
+                          :class="b.status === 'completed' ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border border-amber-500/30 text-amber-200'"
+                          x-text="b.status"></span>
+                      </div>
+                      <div class="text-xs text-slate-400 italic" x-text="'“' + b.injection + '”'"></div>
+                      <template x-if="b.status !== 'completed'">
+                        <div class="mt-2 text-[11px] text-slate-500" x-text="(b.progress?.stage || 'queued') + ' · ' + (b.progress?.percent ?? 0) + '%'"></div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!branches.length">
+                <div class="text-slate-500 text-sm italic">No branches yet. Inject a counterfactual below.</div>
+              </template>
+            </div>
+
+            <!-- raw -->
+            <div x-show="activeTab === 'raw'" class="p-6">
+              <pre class="text-xs text-slate-300 bg-bg-soft border border-bg-border rounded-lg p-4 overflow-auto max-h-[600px]"
+                x-text="JSON.stringify(result, null, 2)"></pre>
+            </div>
+          </div>
+
+          <!-- ⌘K God's Eye console — natural-language injection, design's command-bar pattern -->
+          <div class="rounded-lg border border-bg-border bg-bg-card overflow-hidden">
+            <div class="flex items-center justify-between px-5 py-3 border-b border-bg-border">
+              <div class="flex items-center gap-2.5">
+                <span class="font-mono text-[10px] px-1.5 py-0.5 rounded border border-accent/30 bg-accent/[0.08] text-accent-glow">⌘K</span>
+                <span class="text-[12.5px] font-semibold text-white tracking-tight">God's Eye Console</span>
+                <span class="text-[11px] text-slate-500">— inject a counterfactual to fork a branch</span>
+              </div>
+              <button
+                @click="(_liveScreen() || {}).show?.(job?.job_id, result)"
+                class="inline-flex items-center gap-2 h-7 px-3 rounded-md border border-bg-border bg-bg-soft text-slate-300 hover:text-white hover:border-white/15 text-[11.5px] font-medium transition"
+              >
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                Open Live View
+              </button>
+            </div>
+            <div class="flex items-center gap-2 px-4 py-3">
+              <span class="font-mono text-[10.5px] text-accent shrink-0">›</span>
+              <input
+                x-model="injection"
+                @keydown.enter.prevent="fork()"
+                type="text"
+                placeholder="cut rates by 75bp at step 2…"
+                class="flex-1 bg-transparent text-slate-100 placeholder-slate-600 text-[14px] focus:outline-none font-mono"
+              />
+              <button
+                @click="fork()"
+                :disabled="!injection.trim() || forking"
+                class="inline-flex items-center gap-2 h-8 px-3.5 rounded-md bg-accent hover:bg-accent-glow text-white font-medium text-[12.5px] disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                <template x-if="!forking">
+                  <span class="flex items-center gap-1.5">
+                    <svg class="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4">
+                      <path d="M3 2v4a2 2 0 002 2h2a2 2 0 002-2V2" stroke-linecap="round"/>
+                      <circle cx="3" cy="2" r="1" fill="currentColor"/>
+                      <circle cx="9" cy="2" r="1" fill="currentColor"/>
+                      <circle cx="6" cy="10" r="1" fill="currentColor"/>
+                    </svg>
+                    Fork branch
+                  </span>
+                </template>
+                <template x-if="forking">
+                  <span class="flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-opacity="0.3"/>
+                      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                    </svg>
+                    Forking…
+                  </span>
+                </template>
+              </button>
+            </div>
+          </div>
+        </section>
+      </template>
+
+      <!-- empty state when no result — design's "recent scenarios" card pattern -->
+      <template x-if="!result && !loading && !job">
+        <section class="mt-12">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-[10.5px] font-medium uppercase tracking-[0.08em] text-slate-500">How it works</div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+            <template x-for="card in featureCards" :key="card.title">
+              <div class="rounded-lg border border-bg-border bg-bg-card p-3.5 transition hover:border-white/10">
+                <div class="w-7 h-7 rounded-md bg-accent/10 border border-accent/25 flex items-center justify-center text-accent-glow mb-2.5" x-html="card.icon"></div>
+                <div class="text-[12.5px] font-medium text-white leading-tight" x-text="card.title"></div>
+                <div class="text-[11.5px] text-slate-400 mt-1.5 leading-relaxed" x-text="card.body"></div>
+              </div>
+            </template>
+          </div>
+        </section>
+      </template>
+    </main>
+
+    <!-- toast — negative-tone, design-spec sizing -->
+    <div
+      x-show="toast"
+      x-transition.opacity
+      class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-3.5 py-2.5 rounded-md border border-red-500/30 bg-red-500/[0.08] text-red-200 text-[12.5px] shadow-2xl backdrop-blur max-w-md flex items-start gap-2.5"
+    >
+      <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3">
+        <path d="M6 2l5 8H1z" stroke-linejoin="round"/>
+        <path d="M6 5v2.5M6 8.5v.5" stroke-linecap="round"/>
+      </svg>
+      <div class="flex-1" x-text="toast"></div>
+      <button class="text-red-300/70 hover:text-white text-[14px] leading-none" @click="toast = ''">×</button>
+    </div>
+
+    <!-- ============ LIVE VIEW · Mirofish-style split screen ============ -->
+    <div x-ref="splitView" x-data="splitScreen()" x-show="active" x-transition.opacity
+      class="fixed inset-0 z-50 flex flex-col" style="display:none; background:#0A0B0D">
+
+      <!-- ─── TOP BAR: lockup · stage indicator · agent controls · close ─── -->
+      <div class="h-[52px] border-b border-bg-border bg-bg-card/80 backdrop-blur-md flex items-center px-5 gap-4 shrink-0">
+        <div class="flex items-center gap-2">
+          <svg viewBox="0 0 64 64" class="w-6 h-6">
+            <path d="M32 6 C 18 6, 10 16, 10 30 L 10 48 L 16 44 L 22 48 L 28 44 L 34 48 L 40 44 L 46 48 L 52 44 L 54 48 L 54 30 C 54 16, 46 6, 32 6 Z" fill="#8481FF"/>
+            <circle cx="25" cy="26" r="4" fill="#0A0B0D"/><circle cx="26" cy="25" r="1.4" fill="#F2F3F5"/>
+            <circle cx="41" cy="26" r="4" fill="#0A0B0D"/><circle cx="42" cy="25" r="1.4" fill="#F2F3F5"/>
+            <polyline points="18,36 24,34 30,37 36,33 42,35 48,32" fill="none" stroke="#0A0B0D" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>
+          </svg>
+          <span class="text-[13px] font-semibold tracking-tight">Clyde Live</span>
+        </div>
+
+        <!-- Stage indicator: "Step 3/5 · Run Simulation · running" -->
+        <div class="flex items-center gap-3 ml-2">
+          <span class="font-mono text-[10.5px] text-slate-500 tracking-[0.06em]" x-text="(() => { const i = stages.findIndex(s => s.status==='running'); return 'STEP ' + (i<0 ? stages.filter(s=>s.status==='done').length || 0 : i+1) + '/' + stages.length; })()"></span>
+          <span class="text-[12.5px] font-semibold text-white" x-text="(() => { const r = stages.find(s => s.status==='running'); const d = stages.filter(s => s.status==='done').slice(-1)[0]; return (r?.label) || (d?.label) || stages[0].label; })()"></span>
+          <span class="cl-statuspill">
+            <span class="dot" :style="(() => { const r = stages.find(s => s.status==='running'); return 'background:' + (r ? '#FBBF24' : (stages.every(s => s.status==='done') ? '#4ADE80' : '#72767E')); })()"></span>
+            <span class="text-slate-400" x-text="(() => { const r = stages.find(s => s.status==='running'); if (r) return 'running'; if (stages.every(s => s.status==='done')) return 'complete'; return 'queued'; })()"></span>
+          </span>
+        </div>
+
+        <div class="flex-1"></div>
+
+        <!-- Agent-mode controls -->
+        <template x-if="mode === 'agent'">
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-[11px] text-slate-400 tabular-nums">round <span x-text="agentRound"></span>/<span x-text="agentTotal"></span></span>
+            <button @click="runOneRound()" :disabled="agentStatus==='running_round'||agentStatus==='completed'"
+              class="inline-flex items-center gap-1.5 h-7 px-3 rounded-md border border-bg-border bg-bg-soft text-slate-200 text-[11.5px] font-medium hover:border-white/15 disabled:opacity-30 transition">
+              <svg class="w-2.5 h-2.5" viewBox="0 0 12 12" fill="currentColor"><path d="M3 2l7 4-7 4z"/></svg>
+              Step
+            </button>
+            <button @click="playAgent()" :disabled="agentStatus==='completed'"
+              class="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-[11.5px] font-medium transition"
+              :class="agentPlaying ? 'bg-red-500/[0.08] border border-red-500/30 text-red-300' : 'bg-accent/[0.08] border border-accent/30 text-accent-glow'">
+              <span x-text="agentPlaying ? 'Pause' : 'Auto'"></span>
+            </button>
+          </div>
+        </template>
+        <template x-if="mode === 'pipeline'">
+          <button @click="startAgentMode()" :disabled="agentStatus==='starting' || stages.find(s => s.key==='sim').status !== 'done'"
+            class="inline-flex items-center gap-1.5 h-7 px-3 rounded-md border border-accent/30 bg-accent/[0.08] text-accent-glow text-[11.5px] font-medium hover:bg-accent/15 disabled:opacity-30 transition">
+            Start Agent Mode
+          </button>
+        </template>
+
+        <button @click="close()"
+          class="ml-1 w-8 h-8 rounded-md hover:bg-bg-soft text-slate-500 hover:text-white transition flex items-center justify-center">
+          <svg class="w-4 h-4" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3l6 6M9 3l-6 6" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <!-- ─── MAIN: 3-column split (graph · stages · conversation) ─── -->
+      <div class="flex-1 flex overflow-hidden min-h-0">
+
+        <!-- LEFT · KNOWLEDGE GRAPH -->
+        <div class="w-[44%] border-r border-bg-border flex flex-col min-h-0 relative">
+          <div class="px-5 h-10 border-b border-bg-border bg-[#07080A] flex items-center justify-between shrink-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[10.5px] font-medium uppercase tracking-[0.08em] text-slate-500">Knowledge Graph</span>
+              <span class="font-mono text-[10.5px] text-slate-600">·</span>
+              <span class="font-mono text-[10.5px] text-slate-400" x-text="stageCounters.nodes + ' nodes · ' + stageCounters.edges + ' edges'"></span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button @click="toggleEdgeLabels()"
+                class="inline-flex items-center gap-1.5 h-6 px-2 rounded text-[10.5px] transition"
+                :class="showEdgeLabels ? 'bg-accent/[0.08] border border-accent/30 text-accent-glow' : 'border border-bg-border text-slate-500 hover:text-slate-300'">
+                <span class="font-mono">show edge labels</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex-1 relative min-h-0">
+            <svg x-ref="splitKgSvg" class="w-full h-full"></svg>
+
+            <!-- Empty state — design's "Waiting for ontology generation..." -->
+            <template x-if="!kgNodes.length">
+              <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div class="text-center">
+                  <div class="cl-mascot-float inline-block opacity-60 mb-3">
+                    <svg viewBox="0 0 64 64" class="w-10 h-10">
+                      <path d="M32 6 C 18 6, 10 16, 10 30 L 10 48 L 16 44 L 22 48 L 28 44 L 34 48 L 40 44 L 46 48 L 52 44 L 54 48 L 54 30 C 54 16, 46 6, 32 6 Z" fill="#8481FF" opacity="0.6"/>
+                      <rect x="20" y="24" width="10" height="2.5" rx="1.25" fill="#0A0B0D"/>
+                      <rect x="36" y="24" width="10" height="2.5" rx="1.25" fill="#0A0B0D"/>
+                    </svg>
+                  </div>
+                  <div class="font-mono text-[11.5px] text-slate-500">waiting for graph build…</div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Node detail popover -->
+            <template x-if="kgSelectedNode">
+              <div class="absolute top-3 right-3 w-64 rounded-md border border-bg-border bg-bg-card/95 backdrop-blur p-3 shadow-2xl text-[11.5px]">
+                <div class="flex items-start justify-between mb-2.5">
+                  <div>
+                    <div class="font-mono text-[11.5px] text-white tracking-tight" x-text="kgSelectedNode.id?.replace(/_/g,' ')"></div>
+                    <div class="mt-1 inline-flex">
+                      <span class="font-mono text-[9.5px] px-1.5 py-0.5 rounded uppercase tracking-wide"
+                        :style="'background:'+(nodeColors[kgSelectedNode.type]||'#72767E')+'22;color:'+(nodeColors[kgSelectedNode.type]||'#72767E')"
+                        x-text="kgSelectedNode.type?.replace(/_/g,' ')"></span>
+                    </div>
+                  </div>
+                  <button @click="kgSelectedNode=null" class="text-slate-500 hover:text-white text-base leading-none">×</button>
+                </div>
+                <template x-if="kgSelectedNode.params">
+                  <div class="space-y-0.5 max-h-40 overflow-y-auto">
+                    <template x-for="(v,k) in kgSelectedNode.params" :key="k">
+                      <div class="flex justify-between font-mono text-[10.5px]">
+                        <span class="text-slate-500" x-text="k.replace(/_/g,' ')"></span>
+                        <span class="text-slate-200 tabular-nums" x-text="typeof v==='number'?v.toFixed(4):v"></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- Entity-type legend, bottom-left -->
+            <div class="absolute bottom-3 left-3 px-3 py-2.5 rounded-md border border-bg-border bg-bg-card/85 backdrop-blur">
+              <div class="text-[9.5px] uppercase tracking-[0.08em] text-slate-500 mb-1.5 font-medium">Entity types</div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[10.5px]">
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#4ADE80"></span> Household</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#60A5FA"></span> Firm</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#FBBF24"></span> Bank</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#C084FC"></span> Central Bank</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#F87171"></span> Shocked</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Metric strip (when running an agent sim) -->
+          <template x-if="roundMetrics">
+            <div class="border-t border-bg-border bg-[#07080A] grid grid-cols-5 divide-x divide-bg-border shrink-0">
+              <div class="px-3 py-2"><div class="text-[9px] uppercase tracking-wide text-slate-500">GDP</div><div class="font-mono text-[12px] text-white mt-0.5" x-text="roundMetrics.gdp_index?.toFixed(3)"></div></div>
+              <div class="px-3 py-2"><div class="text-[9px] uppercase tracking-wide text-slate-500">Inflation</div><div class="font-mono text-[12px] text-white mt-0.5" x-text="roundMetrics.inflation_rate?.toFixed(3)"></div></div>
+              <div class="px-3 py-2"><div class="text-[9px] uppercase tracking-wide text-slate-500">Unemp</div><div class="font-mono text-[12px] text-white mt-0.5" x-text="(roundMetrics.unemployment_rate*100)?.toFixed(1)+'%'"></div></div>
+              <div class="px-3 py-2"><div class="text-[9px] uppercase tracking-wide text-slate-500">Credit</div><div class="font-mono text-[12px] text-white mt-0.5" x-text="roundMetrics.credit_tightening_index?.toFixed(3)"></div></div>
+              <div class="px-3 py-2"><div class="text-[9px] uppercase tracking-wide text-slate-500">Bankr</div><div class="font-mono text-[12px] text-white mt-0.5" x-text="roundMetrics.firm_bankruptcy_count"></div></div>
+            </div>
+          </template>
+        </div>
+
+        <!-- RIGHT · stages + conversation, with toggle pill -->
+        <div class="flex-1 flex flex-col min-h-0">
+          <!-- Pane toggle (Mirofish: Graph / Split / Workbench → here: Conversation / Stages) -->
+          <div class="px-5 h-10 border-b border-bg-border bg-[#07080A] flex items-center justify-between shrink-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[10.5px] font-medium uppercase tracking-[0.08em] text-slate-500">Live</span>
+              <div class="flex border border-bg-border rounded-md overflow-hidden">
+                <button @click="activeRightTab='conversation'"
+                  class="px-2.5 py-0.5 text-[10.5px] font-mono transition"
+                  :class="activeRightTab==='conversation' ? 'bg-bg-soft text-white' : 'text-slate-500 hover:text-slate-300'">
+                  conversation
+                </button>
+                <button @click="activeRightTab='actors'"
+                  class="px-2.5 py-0.5 text-[10.5px] font-mono transition border-l border-bg-border"
+                  :class="activeRightTab==='actors' ? 'bg-bg-soft text-white' : 'text-slate-500 hover:text-slate-300'">
+                  actors
+                </button>
+                <button @click="activeRightTab='stages'"
+                  class="px-2.5 py-0.5 text-[10.5px] font-mono transition border-l border-bg-border"
+                  :class="activeRightTab==='stages' ? 'bg-bg-soft text-white' : 'text-slate-500 hover:text-slate-300'">
+                  stages
+                </button>
+              </div>
+            </div>
+            <span class="font-mono text-[10.5px] text-slate-500"
+              x-text="activeRightTab==='conversation' ? (chat.length + ' messages') : activeRightTab==='actors' ? (demoActors.length + ' profiles') : (stages.filter(s=>s.status==='done').length + '/' + stages.length + ' complete')"></span>
+          </div>
+
+          <!-- ─── CONVERSATION PANE ─── -->
+          <div x-show="activeRightTab==='conversation'" class="flex-1 overflow-y-auto split-panel min-h-0">
+            <div class="px-5 py-4 space-y-3">
+              <template x-if="!chat.length">
+                <div class="flex items-center justify-center h-32 text-center">
+                  <div>
+                    <div class="font-mono text-[11.5px] text-slate-500">no actor messages yet</div>
+                    <div class="font-mono text-[10.5px] text-slate-600 mt-1">conversation populates as the simulation runs</div>
+                  </div>
+                </div>
+              </template>
+              <template x-for="m in chat" :key="m.id">
+                <div class="feed-enter flex gap-3">
+                  <!-- avatar bubble -->
+                  <div class="w-8 h-8 rounded-md flex items-center justify-center font-mono text-[12px] font-semibold shrink-0"
+                    :style="'background:'+m.color+'18;border:1px solid '+m.color+'33;color:'+m.color"
+                    x-text="(actorLabel(m.actor) || '?').slice(0,1).toUpperCase()"></div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-baseline gap-2">
+                      <span class="text-[12.5px] font-medium text-white tracking-tight truncate" x-text="actorLabel(m.actor)"></span>
+                      <span class="font-mono text-[9.5px] text-slate-500 uppercase tracking-wide shrink-0" x-text="roleLabel(m.role)"></span>
+                      <span class="flex-1"></span>
+                      <span class="font-mono text-[9.5px] text-slate-600 tabular-nums shrink-0" x-text="m.ts"></span>
+                    </div>
+                    <template x-if="m.action">
+                      <div class="mt-1 inline-flex items-center gap-1.5">
+                        <span class="font-mono text-[9.5px] px-1.5 py-0.5 rounded uppercase tracking-wide"
+                          :style="'background:'+m.color+'15;color:'+m.color"
+                          x-text="m.action.replace(/_/g,' ')"></span>
+                        <template x-if="m.magnitude !== undefined && m.magnitude !== null">
+                          <span class="font-mono text-[10px] text-slate-500"
+                            x-text="(m.magnitude >= 0 ? '+' : '') + Number(m.magnitude).toFixed(3)"></span>
+                        </template>
+                      </div>
+                    </template>
+                    <div class="mt-1.5 text-[12.5px] text-slate-300 leading-[1.5]" x-text="m.body"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- ─── ACTORS PANE — appears in env-setup phase, lists generated personas ─── -->
+          <div x-show="activeRightTab==='actors'" class="flex-1 overflow-y-auto split-panel min-h-0">
+            <div class="px-5 py-4">
+              <div class="mb-3">
+                <div class="text-[12.5px] font-semibold text-white tracking-tight">Actor profiles</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">LLM-generated personas grounded in prior-library behavioral parameters</div>
+              </div>
+              <template x-if="!demoActors.length">
+                <div class="flex items-center justify-center h-32 text-center">
+                  <div>
+                    <div class="font-mono text-[11.5px] text-slate-500">no actors yet</div>
+                    <div class="font-mono text-[10.5px] text-slate-600 mt-1">profiles generate after ontology completes</div>
+                  </div>
+                </div>
+              </template>
+              <div class="space-y-2.5">
+                <template x-for="a in demoActors" :key="a.actor_id">
+                  <div class="feed-enter rounded-md border border-bg-border bg-bg-card p-3.5">
+                    <div class="flex items-start gap-3">
+                      <div class="w-9 h-9 rounded-md flex items-center justify-center font-mono text-[13px] font-semibold shrink-0"
+                        :style="'background:'+(nodeColors[a.actor_type]||'#72767E')+'18;border:1px solid '+(nodeColors[a.actor_type]||'#72767E')+'33;color:'+(nodeColors[a.actor_type]||'#72767E')"
+                        x-text="(a.display_name||'?').slice(0,1).toUpperCase()"></div>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-baseline justify-between gap-2">
+                          <span class="text-[13px] font-semibold text-white tracking-tight truncate" x-text="a.display_name"></span>
+                          <span class="font-mono text-[9.5px] px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0"
+                            :style="'background:'+(nodeColors[a.actor_type]||'#72767E')+'15;color:'+(nodeColors[a.actor_type]||'#72767E')"
+                            x-text="a.actor_type.replace('_',' ')"></span>
+                        </div>
+                        <div class="text-[11.5px] text-slate-400 mt-1 leading-relaxed" x-text="a.role"></div>
+                        <div class="text-[11px] text-slate-500 mt-1.5 leading-relaxed" x-text="a.description"></div>
+                        <div class="mt-2 flex flex-wrap gap-1">
+                          <template x-for="t in (a.tags||[])" :key="t">
+                            <span class="font-mono text-[9.5px] px-1.5 py-0.5 rounded border border-accent/25 bg-accent/[0.06] text-accent-glow" x-text="t"></span>
+                          </template>
+                        </div>
+                        <template x-if="a.vulnerability">
+                          <div class="mt-2 text-[11px] text-red-300/80"><span class="text-red-300 font-medium">vuln:</span> <span x-text="a.vulnerability"></span></div>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- ─── STAGES PANE — Mirofish workbench cards ─── -->
+          <div x-show="activeRightTab==='stages'" class="flex-1 overflow-y-auto split-panel min-h-0">
+            <div class="px-5 py-4 space-y-3">
+              <template x-for="(s, i) in stages" :key="s.key">
+                <div class="rounded-md border bg-bg-card overflow-hidden transition"
+                  :class="s.status==='running' ? 'border-amber-400/40 shadow-[0_0_0_1px_rgba(251,191,36,0.10)]' : s.status==='done' ? 'border-emerald-400/30' : 'border-bg-border'">
+                  <div class="px-4 py-3">
+                    <div class="flex items-start justify-between gap-3 mb-1.5">
+                      <div class="flex items-baseline gap-2 min-w-0">
+                        <span class="font-mono text-[10.5px] text-slate-500 tabular-nums" x-text="String(i+1).padStart(2,'0')"></span>
+                        <span class="text-[13px] font-semibold text-white tracking-tight truncate" x-text="s.label"></span>
+                      </div>
+                      <span class="font-mono text-[9.5px] px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0"
+                        :class="s.status==='done' ? 'bg-emerald-400/10 text-emerald-300 border border-emerald-400/25' : s.status==='running' ? 'bg-amber-400/10 text-amber-300 border border-amber-400/25' : 'bg-bg-soft text-slate-500 border border-bg-border'"
+                        x-text="s.status==='done' ? 'COMPLETE' : s.status==='running' ? 'RUNNING' : 'PENDING'"></span>
+                    </div>
+                    <div class="font-mono text-[10px] text-slate-500 mb-1.5" x-text="s.endpoint"></div>
+                    <div class="text-[11.5px] text-slate-400 leading-relaxed" x-text="s.note"></div>
+                    <template x-if="s.key === 'graph' && (stageCounters.nodes || stageCounters.edges)">
+                      <div class="mt-3 grid grid-cols-3 gap-px bg-bg-border rounded overflow-hidden">
+                        <div class="bg-bg-card px-3 py-2 text-center">
+                          <div class="font-mono text-[15px] font-medium text-white" x-text="stageCounters.nodes"></div>
+                          <div class="text-[9px] uppercase tracking-wide text-slate-500 mt-0.5">Entity nodes</div>
+                        </div>
+                        <div class="bg-bg-card px-3 py-2 text-center">
+                          <div class="font-mono text-[15px] font-medium text-white" x-text="stageCounters.edges"></div>
+                          <div class="text-[9px] uppercase tracking-wide text-slate-500 mt-0.5">Relation edges</div>
+                        </div>
+                        <div class="bg-bg-card px-3 py-2 text-center">
+                          <div class="font-mono text-[15px] font-medium text-white" x-text="stageCounters.schemas"></div>
+                          <div class="text-[9px] uppercase tracking-wide text-slate-500 mt-0.5">Schema types</div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+
+              <template x-if="!stages.some(s => s.status === 'running') && stages.every(s => s.status === 'done') && demoStage === null">
+                <button @click="close()"
+                  class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-md bg-accent hover:bg-accent-glow text-white font-medium text-[12.5px] transition">
+                  Open Report
+                  <svg class="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6h8m-3-3l3 3-3 3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Demo-flow sticky CTA — visible from any tab -->
+          <template x-if="demoStage === 'awaitSetup' || demoStage === 'awaitConfig' || demoStage === 'configReady' || demoStage === 'done'">
+            <div class="border-t border-bg-border bg-[#07080A] px-5 py-3 shrink-0">
+              <template x-if="demoStage === 'awaitSetup'">
+                <button @click="demoContinueToSetup()"
+                  class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-md bg-accent hover:bg-accent-glow text-white font-medium text-[12.5px] transition">
+                  Go to Environment Setup
+                  <svg class="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6h8m-3-3l3 3-3 3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </template>
+              <template x-if="demoStage === 'awaitConfig'">
+                <button @click="demoGenerateConfig()"
+                  class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-md bg-accent hover:bg-accent-glow text-white font-medium text-[12.5px] transition">
+                  Generate Simulation Config
+                  <svg class="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6h8m-3-3l3 3-3 3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </template>
+              <template x-if="demoStage === 'configReady'">
+                <button @click="demoStartSimulation()"
+                  class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-md bg-accent hover:bg-accent-glow text-white font-medium text-[12.5px] transition">
+                  Start Dual-Platform Simulation
+                  <svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M3 2l7 4-7 4z"/></svg>
+                </button>
+              </template>
+              <template x-if="demoStage === 'done'">
+                <button @click="close(); (Alpine.$data(document.body).openReport)?.()"
+                  class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-md bg-accent hover:bg-accent-glow text-white font-medium text-[12.5px] transition">
+                  Open Report
+                  <svg class="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6h8m-3-3l3 3-3 3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </template>
+            </div>
+          </template>
+
+          <!-- ⌘K inject bar (agent mode) -->
+          <template x-if="mode === 'agent'">
+            <div class="px-4 py-2.5 border-t border-bg-border bg-[#07080A] flex items-center gap-2 shrink-0">
+              <span class="font-mono text-[10px] px-1.5 py-0.5 rounded border border-accent/30 bg-accent/[0.08] text-accent-glow shrink-0">⌘K</span>
+              <input type="text" x-model="injectText" :disabled="injecting" @keydown.enter.prevent="injectEvent()"
+                placeholder="cut rates by 75bp at step 2…"
+                class="flex-1 bg-transparent text-[12px] text-amber-100 placeholder-slate-600 focus:outline-none font-mono" />
+              <button @click="injectEvent()" :disabled="!injectText.trim() || injecting"
+                class="h-7 px-3 rounded-md bg-amber-500/[0.08] border border-amber-500/30 text-amber-300 text-[11px] font-medium hover:bg-amber-500/15 disabled:opacity-30 transition">
+                Inject
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ─── BOTTOM · SYSTEM DASHBOARD (terminal log) ─── -->
+      <div class="border-t border-bg-border bg-[#07080A] shrink-0">
+        <div class="px-5 h-7 flex items-center justify-between border-b border-bg-border">
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-[9.5px] uppercase tracking-[0.08em] text-slate-500">System Dashboard</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+          </div>
+          <span class="font-mono text-[9.5px] text-slate-600 tabular-nums" x-text="jobId ? ('job ' + jobId.slice(-12)) : ''"></span>
+        </div>
+        <div class="px-5 py-2 h-[112px] overflow-y-auto split-panel font-mono text-[10.5px] leading-[1.6]"
+          x-ref="sysLogScroll"
+          x-effect="$refs.sysLogScroll && (sysLog.length, $nextTick(() => { $refs.sysLogScroll.scrollTop = $refs.sysLogScroll.scrollHeight; }))">
+          <template x-if="!sysLog.length">
+            <div class="text-slate-600">— no events yet —</div>
+          </template>
+          <template x-for="line in sysLog" :key="line.id">
+            <div class="flex gap-3 text-slate-400">
+              <span class="text-slate-600 shrink-0" x-text="line.ts"></span>
+              <span class="shrink-0 font-medium uppercase tracking-wide"
+                :class="line.level==='ok' ? 'text-emerald-400' : line.level==='warn' ? 'text-amber-400' : line.level==='err' ? 'text-red-400' : line.level==='trace' ? 'text-accent-glow' : 'text-slate-500'"
+                x-text="({info:'INFO',ok:' OK ',warn:'WARN',err:'ERR ',trace:'TRCE'}[line.level] || 'INFO')"></span>
+              <span class="text-slate-500 shrink-0" x-text="line.source"></span>
+              <span class="text-slate-300" x-text="line.body"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ REPORT OVERLAY · final synthesis + ElevenLabs TTS ============ -->
+    <div x-show="reportOpen" x-transition.opacity
+      class="fixed inset-0 z-[60] flex items-center justify-center p-4 backdrop-blur-md"
+      style="display:none; background:rgba(7,8,10,0.82)"
+      @keydown.escape.window="closeReport()">
+      <div @click.outside="closeReport()"
+        class="relative w-full max-w-4xl max-h-[88vh] flex flex-col rounded-lg border border-bg-border bg-bg-card overflow-hidden shadow-2xl">
+        <!-- Header -->
+        <div class="px-6 py-4 border-b border-bg-border flex items-start gap-4">
+          <svg viewBox="0 0 64 64" class="w-7 h-7 shrink-0 mt-0.5">
+            <path d="M32 6 C 18 6, 10 16, 10 30 L 10 48 L 16 44 L 22 48 L 28 44 L 34 48 L 40 44 L 46 48 L 52 44 L 54 48 L 54 30 C 54 16, 46 6, 32 6 Z" fill="#8481FF"/>
+            <circle cx="25" cy="26" r="4" fill="#0A0B0D"/><circle cx="26" cy="25" r="1.4" fill="#F2F3F5"/>
+            <circle cx="41" cy="26" r="4" fill="#0A0B0D"/><circle cx="42" cy="25" r="1.4" fill="#F2F3F5"/>
+            <polyline points="18,36 24,34 30,37 36,33 42,35 48,32" fill="none" stroke="#0A0B0D" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>
+          </svg>
+          <div class="flex-1 min-w-0">
+            <div class="text-[10.5px] font-mono uppercase tracking-[0.08em] text-slate-500">Clyde · Economic Impact Report</div>
+            <h2 class="text-[20px] font-semibold text-white tracking-tight mt-0.5" x-text="reportTitle"></h2>
+            <div class="font-mono text-[10.5px] text-slate-500 mt-1">scenario: AWS us-east-1 outage · Oct 19–20, 2025 · synthesis grounded in incident post-mortem</div>
+          </div>
+          <button @click="closeReport()"
+            class="shrink-0 w-8 h-8 rounded-md hover:bg-bg-soft text-slate-500 hover:text-white transition flex items-center justify-center">
+            <svg class="w-4 h-4" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3l6 6M9 3l-6 6" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+
+        <!-- Stats strip -->
+        <div class="grid grid-cols-3 md:grid-cols-6 divide-x divide-bg-border border-b border-bg-border">
+          <template x-for="s in reportStats" :key="s.label">
+            <div class="px-4 py-3">
+              <div class="text-[9.5px] uppercase tracking-[0.08em] text-slate-500" x-text="s.label"></div>
+              <div class="font-mono text-[14px] font-medium mt-1"
+                :class="s.tone === 'negative' ? 'text-red-300' : s.tone === 'warn' ? 'text-amber-300' : 'text-white'"
+                x-text="s.value"></div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Body -->
+        <div class="flex-1 overflow-y-auto split-panel px-7 py-6">
+          <div class="prose-clyde max-w-none text-[13.5px]" x-html="renderMd(reportSummary)"></div>
+        </div>
+
+        <!-- Footer with TTS controls -->
+        <div class="px-5 py-3 border-t border-bg-border bg-[#07080A] flex items-center gap-3 shrink-0">
+          <button @click="playReportTts()"
+            class="inline-flex items-center gap-2 h-9 px-4 rounded-md font-medium text-[12.5px] transition"
+            :class="reportTtsState === 'playing' ? 'bg-red-500/[0.12] border border-red-500/40 text-red-300 hover:bg-red-500/20' : 'bg-accent hover:bg-accent-glow text-white'"
+            :disabled="reportTtsState === 'loading'">
+            <template x-if="reportTtsState === 'idle'">
+              <span class="flex items-center gap-2">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8 2L4 5H2v6h2l4 3z"/>
+                  <path d="M11.5 4.5a4 4 0 010 7M13.5 2a7 7 0 010 12" stroke-linecap="round"/>
+                </svg>
+                Listen — narrated summary
+              </span>
+            </template>
+            <template x-if="reportTtsState === 'loading'">
+              <span class="flex items-center gap-2">
+                <svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-opacity="0.3"/>
+                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                </svg>
+                Synthesizing audio…
+              </span>
+            </template>
+            <template x-if="reportTtsState === 'playing'">
+              <span class="flex items-center gap-2">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 12 12" fill="currentColor"><rect x="3" y="2" width="2.5" height="8"/><rect x="6.5" y="2" width="2.5" height="8"/></svg>
+                Stop
+              </span>
+            </template>
+          </button>
+          <span class="font-mono text-[10.5px] text-slate-500">voice synthesis: <span class="text-slate-300">ElevenLabs · George</span></span>
+          <span class="flex-1"></span>
+          <button @click="closeReport()" class="text-slate-400 hover:text-white text-[12px] font-medium">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/_mixin.js"></script>
+    <script src="/static/split.js"></script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars (which is gitignored) and fill in.
+# Anything you leave at "" stays empty in the server's .env.
+
+aws_region    = "us-east-1"
+name_prefix   = "clyde"
+instance_type = "t3.small" # use "t3.micro" for free-tier
+disk_gb       = 20
+
+# Paste the public-key contents (NOT a file path).
+# Generate one if you don't have it: ssh-keygen -t ed25519 -f ~/.ssh/clyde
+ssh_pub_key = "ssh-ed25519 AAAA... your.email@host"
+# Lock SSH to your IP for safety (run `curl -s ifconfig.me` to find it).
+ssh_cidr = "0.0.0.0/0" # tighten to "X.X.X.X/32"
+
+repo_url = "https://github.com/raj-chinagundi/Clyde.git"
+repo_ref = "main"
+
+# Optional. If set, Caddy issues a Let's Encrypt cert automatically.
+# Point an A record for this name at the Elastic IP after `terraform apply`,
+# then run `sudo systemctl reload caddy` once on the box.
+domain = ""
+
+# Secrets — keep this file out of git (terraform/.gitignore covers *.tfvars).
+cerebras_api_key   = ""
+openrouter_api_key = ""
+elevenlabs_api_key = ""
+clyde_provider     = "" # auto | cerebras | openrouter | mock (leave blank for auto)
+clyde_model        = ""

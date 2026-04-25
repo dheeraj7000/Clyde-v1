@@ -1,0 +1,29 @@
+{
+  "enabled": true,
+  "name": "Update README on File Edit",
+  "description": "After a code file is edited and saved, the agent updates the README with information about the changes.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "*.ts",
+      "*.tsx",
+      "*.js",
+      "*.jsx",
+      "*.py",
+      "*.java",
+      "*.go",
+      "*.rs",
+      "*.cpp",
+      "*.c",
+      "*.cs",
+      "*.rb",
+      "*.swift",
+      "*.kt"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A code file was just edited. Review the changes and update the README to reflect any meaningful updates — include a brief description of what changed and why it matters."
+  }
+}

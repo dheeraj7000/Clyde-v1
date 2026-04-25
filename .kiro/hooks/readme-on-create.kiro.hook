@@ -1,0 +1,29 @@
+{
+  "enabled": true,
+  "name": "Update README on File Create",
+  "description": "After a new code file is created, the agent updates the README with information about the new addition.",
+  "version": "1",
+  "when": {
+    "type": "fileCreated",
+    "patterns": [
+      "*.ts",
+      "*.tsx",
+      "*.js",
+      "*.jsx",
+      "*.py",
+      "*.java",
+      "*.go",
+      "*.rs",
+      "*.cpp",
+      "*.c",
+      "*.cs",
+      "*.rb",
+      "*.swift",
+      "*.kt"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A new code file was just created. Review the file and update the README to reflect the new addition — include a brief description of what the file does and any relevant details about the change."
+  }
+}

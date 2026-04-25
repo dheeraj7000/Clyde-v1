@@ -1,0 +1,16 @@
+# Terraform working state
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfstate.*.backup
+crash.log
+crash.*.log
+
+# Var files contain secrets; only the example is committed.
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+
+# Plan artifacts
+*.tfplan

@@ -1,0 +1,83 @@
+#cloud-config
+# Clyde — server bootstrap. Renders once on first boot via EC2 user-data.
+# Watch progress: sudo tail -f /var/log/cloud-init-output.log
+
+package_update: true
+package_upgrade: false # speed up first boot
+packages:
+  - git
+  - python3-venv
+  - python3-pip
+  - build-essential
+  - curl
+  - debian-keyring
+  - debian-archive-keyring
+  - apt-transport-https
+
+write_files:
+  - path: /opt/clyde/.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      CEREBRAS_API_KEY=${cerebras_key}
+      OPENROUTER_API_KEY=${openrouter_key}
+      CLYDE_ELEVENLABS_KEY=${elevenlabs_key}
+      CLYDE_LLM_PROVIDER=${clyde_provider}
+      CLYDE_MODEL=${clyde_model}
+
+  - path: /etc/systemd/system/clyde.service
+    content: |
+      [Unit]
+      Description=Clyde economic simulator
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=ubuntu
+      Group=ubuntu
+      WorkingDirectory=/opt/clyde/app
+      EnvironmentFile=/opt/clyde/.env
+      ExecStart=/opt/clyde/app/.venv/bin/python -m clyde.web
+      Restart=on-failure
+      RestartSec=3
+      # Keep memory in check on small instances.
+      MemoryHigh=80%
+      MemoryMax=90%
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/caddy/Caddyfile
+    content: |
+      %{ if domain != "" }${domain} {
+        reverse_proxy 127.0.0.1:8000
+      }
+      %{ else }:80 {
+        reverse_proxy 127.0.0.1:8000
+      }
+      %{ endif }
+
+runcmd:
+  # ── Install Caddy from the official Cloudsmith repo ──
+  - bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
+  - bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list"
+  - apt-get update -y
+  - apt-get install -y caddy
+  # ── Clone the app ──
+  - mkdir -p /opt/clyde/app
+  - chown -R ubuntu:ubuntu /opt/clyde
+  - sudo -u ubuntu git clone --depth 1 -b ${repo_ref} ${repo_url} /opt/clyde/app
+  # ── Python env + install ──
+  - sudo -u ubuntu python3 -m venv /opt/clyde/app/.venv
+  - sudo -u ubuntu /opt/clyde/app/.venv/bin/pip install --upgrade pip wheel
+  - sudo -u ubuntu /opt/clyde/app/.venv/bin/pip install -e '/opt/clyde/app[web]'
+  # ── Hand .env to ubuntu so the systemd unit can read it ──
+  - chown ubuntu:ubuntu /opt/clyde/.env
+  - chmod 600 /opt/clyde/.env
+  # ── Bring services up ──
+  - systemctl daemon-reload
+  - systemctl enable --now clyde.service
+  - systemctl reload caddy
+  # ── Final smoke check (non-fatal if Clyde is still warming up) ──
+  - bash -c 'for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS http://127.0.0.1:8000/api/health && break || sleep 3; done'

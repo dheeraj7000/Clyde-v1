@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Post-Task Alignment Check",
+  "description": "After a spec task is completed, reviews all recently created/modified files to ensure cross-file consistency — matching imports, compatible type signatures, consistent dataclass fields, and no interface mismatches between modules.",
+  "version": "1",
+  "when": {
+    "type": "postTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A spec task just completed. Review all files created or modified during this task and check for cross-file alignment issues:\n\n1. **Import consistency**: Verify all imports resolve to actual symbols exported by their target modules. Flag any missing or mismatched imports.\n2. **Type/interface compatibility**: Check that dataclass fields, function signatures, and return types are consistent across module boundaries (e.g., if module A passes an object to module B, the fields match what B expects).\n3. **Naming consistency**: Ensure class names, method names, and variable names referenced across files match exactly (no typos, no casing mismatches).\n4. **Contract alignment**: If any module defines an interface or protocol, verify all implementations satisfy it.\n5. **Architectural boundary**: Confirm that clyde/simulation/ has zero imports from clyde/llm/ or any LLM client library.\n\nIf you find mismatches, fix them immediately. If everything is aligned, briefly confirm and move on."
+  }
+}
