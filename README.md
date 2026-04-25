@@ -1,4 +1,4 @@
-# Clyde
+# Clyde - Try it here [!d1dyxnz19czjx8.cloudfront.net/]
 
 > Situation-agnostic economic simulator. Describe an event in plain English; get distributional outcomes with traceable causal chains.
 
