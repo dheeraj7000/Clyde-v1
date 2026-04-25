@@ -15,7 +15,7 @@
 
 ---
 
-## What is Clyde?
+## What is Clyde ??
 
 Clyde is a **situation-agnostic economic simulator**. You describe any economic event, policy, or shock in natural language — a Fed rate hike, a regional drought, a supply-chain disruption, a payroll-tax change — and Clyde builds a causal model of the affected actors and incentives, runs an ensemble of Monte Carlo simulations, and explains how the effects propagate.
 
